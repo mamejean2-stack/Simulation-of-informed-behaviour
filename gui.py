@@ -312,6 +312,7 @@ class App(tk.Tk):
     def _draw_map(self, t=1.0):
         ax = self.ax_map
         ax.clear()
+        self._map_ann = None   # cleared by ax.clear(), must recreate
         ax.set_facecolor("#0d1b2a")
         ax.set_xlim(-1, GRID_SIZE)
         ax.set_ylim(-1, GRID_SIZE)
@@ -438,6 +439,8 @@ class App(tk.Tk):
     def _draw_graph(self):
         ax  = self.ax_graph
         ax.clear()
+        self._hover_ann  = None   # cleared by ax.clear(), must recreate
+        self._hover_vline = []
         ax.set_facecolor("#0d1b2a")
         ax.set_title("Population Status", color=FG, fontsize=9, pad=8)
         ax.set_xlabel("Step",    color=FG_DIM, fontsize=8)
