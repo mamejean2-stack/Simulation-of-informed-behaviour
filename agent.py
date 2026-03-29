@@ -34,6 +34,13 @@ class Citizen(mesa.Agent):
         self.escape_origin    = None   # cell they were on when they left
         self.escape_direction = None   # "safe" | "dangerous"
 
+        # ── For smooth animation in the GUI ──────────────────────────
+        # prev_position : where this agent was at the start of the last step
+        # _info_event   : what caused a confidence gain this step
+        #                 None | "fire" | "peer" | "media"
+        self.prev_position = position
+        self._info_event   = None
+
     # ── Convenience alias (visualiser reads this) ────────────────────
     @property
     def information_level(self):
@@ -194,16 +201,31 @@ class Citizen(mesa.Agent):
         if not self.alive or self.evacuated:
             return
 
+        # Snapshot position before any movement (used by GUI interpolation)
+        self.prev_position = self.position
+        self._info_event   = None
+
         # Die if fire has reached this cell
         x, y = self.position
         if self.model.cells[x][y].fire_state == "burning":
             self.alive = False
             return
 
-        # Gather information
+        # Gather information — track which source caused a meaningful gain
+        conf_before = self.belief_confidence
         self._scan_for_fire()
+        if self.belief_confidence > conf_before + 0.05:
+            self._info_event = "fire"
+
+        conf_before = self.belief_confidence
         self._exchange_info()
+        if self._info_event is None and self.belief_confidence > conf_before + 0.05:
+            self._info_event = "peer"
+
+        conf_before = self.belief_confidence
         self._receive_media_alert()
+        if self._info_event is None and self.belief_confidence > conf_before + 0.05:
+            self._info_event = "media"
 
         # Move — try preferred direction first, then others in random order
         preferred = self._choose_direction()
