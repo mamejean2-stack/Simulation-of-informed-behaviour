@@ -1,135 +1,216 @@
 # agent.py
-# Describes each individual citizen in the city simulation
+# Each citizen navigates the city, builds a belief about the fire,
+# and tries to evacuate by reaching the grid border.
 
 import mesa
 import random
 import math
 
+
 class Citizen(mesa.Agent):
     """
-    A single citizen living in the city.
-    Each citizen has a position, belongs to a group,
-    receives information about the fire, and tries to evacuate.
-    Their survival depends on which direction they run.
+    A single citizen. Movement and evacuation decisions are driven by
+    a continuously updated belief about where the fire is.
     """
 
     def __init__(self, unique_id, model, group, position):
         super().__init__(unique_id, model)
 
-        # Which district this citizen lives in
-        self.group = group
+        self.group    = group
+        self.position = position   # (x, y) — current cell
 
-        # Their (x, y) position on the city grid
-        self.position = position
+        # ── Belief about fire location ───────────────────────────────
+        # fire_belief       : estimated (x, y) of the fire — None until
+        #                     the citizen has seen or heard something
+        # belief_confidence : 0.0 (clueless) → 1.0 (certain)
+        self.fire_belief       = None
+        self.belief_confidence = 0.0
 
-        # Where they were when they decided to evacuate
-        # This is empty until they actually start evacuating
-        self.escape_origin = None
-
-        # How informed is this citizen about the fire? (0.0 to 1.0)
-        self.information_level = 0.0
-
-        # Has this citizen decided to evacuate?
+        # ── Status ───────────────────────────────────────────────────
+        self.alive     = True
         self.evacuated = False
 
-        # Is this citizen still alive?
-        self.alive = True
+        # ── For CSV output / visualiser compatibility ────────────────
+        self.escape_origin    = None   # cell they were on when they left
+        self.escape_direction = None   # "safe" | "dangerous"
 
-        # Their survival chance (0.0 to 1.0), calculated when they evacuate
-        self.survival_chance = None
+    # ── Convenience alias (visualiser reads this) ────────────────────
+    @property
+    def information_level(self):
+        return self.belief_confidence
 
-        # The direction they ran: "safe" or "dangerous"
-        self.escape_direction = None
+    # ────────────────────────────────────────────────────────────────
+    # INFORMATION
+    # ────────────────────────────────────────────────────────────────
 
-    def receive_information(self, amount):
+    def _scan_for_fire(self):
         """
-        Receive information from a neighbour or media.
-        More informed citizens are more likely to run the right way.
+        Look at every cell within vision_radius (Manhattan distance).
+        Each burning cell seen updates the belief; closer = higher confidence.
         """
-        self.information_level = min(1.0, self.information_level + amount)
+        x, y = self.position
+        r    = self.model.vision_radius
 
-    def calculate_escape_direction(self):
+        for dx in range(-r, r + 1):
+            for dy in range(-r, r + 1):
+                if abs(dx) + abs(dy) > r:
+                    continue
+                nx, ny = x + dx, y + dy
+                if not (0 <= nx < self.model.grid_width and
+                        0 <= ny < self.model.grid_height):
+                    continue
+                if self.model.cells[nx][ny].fire_state == "burning":
+                    dist       = max(1, abs(dx) + abs(dy))
+                    confidence = 1.0 / dist
+                    self._merge_belief((float(nx), float(ny)), confidence)
+
+    def _merge_belief(self, pos, confidence):
         """
-        Decide which way the citizen runs when evacuating.
-
-        - A well informed citizen (high information_level) is more likely
-          to run AWAY from the fire = "safe" direction.
-        - A poorly informed citizen may accidentally run TOWARD the fire
-          = "dangerous" direction.
-
-        Returns "safe" or "dangerous"
+        Weighted-average merge of a new observation into the current belief.
+        Higher-confidence observations pull the estimate further.
         """
-        fire_x, fire_y = self.model.fire_position
-        citizen_x, citizen_y = self.position
-
-        # Calculate how far this citizen is from the fire
-        distance_from_fire = math.sqrt(
-            (citizen_x - fire_x) ** 2 + (citizen_y - fire_y) ** 2
-        )
-
-        # The more informed you are, the higher the chance you go the right way
-        # Example: information_level = 0.9 → 90% chance of going safe direction
-        chance_of_correct_direction = self.information_level
-
-        if random.random() < chance_of_correct_direction:
-            return "safe"
-        else:
-            return "dangerous"
-
-    def calculate_survival_chance(self):
-        """
-        Calculate the probability of surviving based on:
-        - Which direction the citizen ran
-        - How far they were from the fire when they evacuated
-        """
-        fire_x, fire_y = self.model.fire_position
-        origin_x, origin_y = self.escape_origin
-
-        # Distance from the fire at the moment of evacuation
-        distance = math.sqrt(
-            (origin_x - fire_x) ** 2 + (origin_y - fire_y) ** 2
-        )
-
-        # Normalise distance: the further away, the better (max distance on grid)
-        max_distance = math.sqrt(
-            self.model.grid_width ** 2 + self.model.grid_height ** 2
-        )
-        distance_bonus = distance / max_distance  # value between 0.0 and 1.0
-
-        # Running the safe way gives a big survival bonus
-        if self.escape_direction == "safe":
-            base_chance = 0.85
-        else:
-            base_chance = 0.15
-
-        return min(1.0, base_chance + distance_bonus * 0.15)
-
-    def step(self):
-        """
-        Each simulation step:
-        1. Receive information from connected neighbours in the social network
-        2. Decide to evacuate once informed enough
-        3. Calculate survival outcome at the moment of evacuation
-        """
-        if not self.alive:
+        if self.fire_belief is None:
+            self.fire_belief       = pos
+            self.belief_confidence = min(1.0, confidence)
             return
 
-        if not self.evacuated:
-            # Pull information from every neighbour who knows more than us
-            for neighbor_id in self.model.social_network.neighbors(self.unique_id):
-                neighbor = self.model._agents_by_id.get(neighbor_id)
-                if neighbor and neighbor.information_level > self.information_level:
-                    self.receive_information(
-                        (neighbor.information_level - self.information_level) * 0.3
-                    )
+        w_old = self.belief_confidence
+        w_new = confidence
+        total = w_old + w_new
+        self.fire_belief = (
+            (self.fire_belief[0] * w_old + pos[0] * w_new) / total,
+            (self.fire_belief[1] * w_old + pos[1] * w_new) / total,
+        )
+        # Merging two sources increases confidence, but with diminishing returns
+        self.belief_confidence = min(1.0, total * 0.55)
 
-            # Evacuate once informed enough (threshold: 0.3)
-            if self.information_level >= 0.3:
-                self.evacuated     = True
-                self.escape_origin = self.position
-                self.escape_direction = self.calculate_escape_direction()
-                self.survival_chance  = self.calculate_survival_chance()
+    def _exchange_info(self):
+        """
+        Talk to every other citizen on the same cell.
+        Each pair merges their beliefs; shared knowledge boosts confidence.
+        """
+        x, y = self.position
+        for other in self.model._agents_by_id.values():
+            if (other is self
+                    or not other.alive
+                    or other.evacuated
+                    or other.position != (x, y)
+                    or other.fire_belief is None):
+                continue
+            if self.fire_belief is None:
+                self.fire_belief       = other.fire_belief
+                self.belief_confidence = other.belief_confidence * 0.8
+            else:
+                wa    = self.belief_confidence
+                wb    = other.belief_confidence
+                total = wa + wb
+                self.fire_belief = (
+                    (self.fire_belief[0] * wa + other.fire_belief[0] * wb) / total,
+                    (self.fire_belief[1] * wa + other.fire_belief[1] * wb) / total,
+                )
+                # Talking to someone who agrees raises confidence slightly
+                self.belief_confidence = min(1.0, (wa + wb) * 0.5 + 0.1)
 
-                # Roll against survival chance to determine outcome
-                if random.random() > self.survival_chance:
-                    self.alive = False
+    def _receive_media_alert(self):
+        """
+        5 % chance per step of a noisy broadcast about the fire origin.
+        Adds Gaussian noise to the real position, so it helps but isn't perfect.
+        Only active when model.media_alerts_on is True.
+        """
+        if not self.model.media_alerts_on:
+            return
+        if random.random() < 0.05:
+            ox, oy    = self.model.fire_origin
+            noisy_pos = (ox + random.gauss(0, 2.0),
+                         oy + random.gauss(0, 2.0))
+            self._merge_belief(noisy_pos, 0.3)
+
+    # ────────────────────────────────────────────────────────────────
+    # MOVEMENT
+    # ────────────────────────────────────────────────────────────────
+
+    def _choose_direction(self):
+        """
+        Pick one of the four cardinal directions to move in.
+        With probability = belief_confidence, take the direction
+        most away from the believed fire; otherwise move randomly.
+        """
+        if self.fire_belief is None or self.belief_confidence < 0.05:
+            return random.choice([(0, 1), (0, -1), (1, 0), (-1, 0)])
+
+        x, y   = self.position
+        bx, by = self.fire_belief
+        # Vector pointing away from the estimated fire
+        away_x = x - bx
+        away_y = y - by
+
+        directions = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+        scores     = [dx * away_x + dy * away_y for dx, dy in directions]
+
+        if random.random() < self.belief_confidence:
+            return directions[scores.index(max(scores))]
+        return random.choice(directions)
+
+    def _moving_away_from_fire(self, dx, dy):
+        """Return True if the step (dx, dy) moves away from the believed fire."""
+        if self.fire_belief is None:
+            return False
+        x, y   = self.position
+        bx, by = self.fire_belief
+        return (dx * (x - bx) + dy * (y - by)) > 0
+
+    def _try_move(self, dx, dy):
+        """
+        Attempt one step in direction (dx, dy).
+        - Off the grid       → evacuated, record direction quality
+        - Burning cell ahead → blocked, return False so caller can try another
+        - Empty cell         → move, return True
+        """
+        x, y   = self.position
+        nx, ny = x + dx, y + dy
+
+        # Stepping off the grid evacuates the citizen
+        if not (0 <= nx < self.model.grid_width and
+                0 <= ny < self.model.grid_height):
+            self.evacuated        = True
+            self.escape_origin    = self.position
+            self.escape_direction = (
+                "safe" if self._moving_away_from_fire(dx, dy) else "dangerous"
+            )
+            return True
+
+        # Won't walk into fire
+        if self.model.cells[nx][ny].fire_state == "burning":
+            return False
+
+        self.position = (nx, ny)
+        return True
+
+    # ────────────────────────────────────────────────────────────────
+    # STEP
+    # ────────────────────────────────────────────────────────────────
+
+    def step(self):
+        if not self.alive or self.evacuated:
+            return
+
+        # Die if fire has reached this cell
+        x, y = self.position
+        if self.model.cells[x][y].fire_state == "burning":
+            self.alive = False
+            return
+
+        # Gather information
+        self._scan_for_fire()
+        self._exchange_info()
+        self._receive_media_alert()
+
+        # Move — try preferred direction first, then others in random order
+        preferred = self._choose_direction()
+        fallbacks = [(dx, dy) for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]
+                     if (dx, dy) != preferred]
+        random.shuffle(fallbacks)
+
+        for direction in [preferred] + fallbacks:
+            if self._try_move(*direction):
+                break

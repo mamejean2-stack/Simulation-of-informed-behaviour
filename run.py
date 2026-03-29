@@ -13,17 +13,12 @@ import pandas as pd
 CITY_WIDTH      = 20    # Width of the city grid (in cells)
 CITY_HEIGHT     = 20    # Height of the city grid (in cells)
 POPULATION      = 100   # Total number of citizens
-NUMBER_OF_STEPS = 10    # How many time steps the simulation runs
+NUMBER_OF_STEPS = 20    # How many time steps the simulation runs
 
 # ─────────────────────────────────────────────
 # POPULATION GROUPS
 # Each group has a name and a percentage of the total population
 # All percentages must add up to exactly 1.0
-#
-# FUTURE: each group will also have:
-# - information_gain_rate  (how fast they receive info)
-# - trust_in_strangers     (how much they trust other groups)
-# - panic_threshold        (how much info they need before evacuating)
 # ─────────────────────────────────────────────
 
 GROUP_DISTRIBUTION = {
@@ -31,6 +26,17 @@ GROUP_DISTRIBUTION = {
     "south_district" : 0.35,   # 35 citizens — furthest from the fire
     "city_centre"    : 0.25,   # 25 citizens — mixed proximity
 }
+
+# ─────────────────────────────────────────────
+# FIRE & ENVIRONMENT SETTINGS
+# ─────────────────────────────────────────────
+
+FIRE_SPREAD_CHANCE  = 0.30   # base probability of fire spreading per step
+FIRE_BURN_DURATION  = 8      # steps a cell burns before becoming ash
+WIND_DIRECTION      = "E"    # N | S | E | W
+WIND_STRENGTH       = 0.20   # extra spread probability in wind direction
+VISION_RADIUS       = 3      # how many cells away a citizen can see fire
+MEDIA_ALERTS_ON     = True   # random noisy broadcast about fire location
 
 # ─────────────────────────────────────────────
 # LAUNCH THE SIMULATION
@@ -43,14 +49,22 @@ print(f"  City size   : {CITY_WIDTH} x {CITY_HEIGHT}")
 print(f"  Population  : {POPULATION} citizens")
 print(f"  Groups      : {list(GROUP_DISTRIBUTION.keys())}")
 print(f"  Steps       : {NUMBER_OF_STEPS}")
+print(f"  Spread      : {FIRE_SPREAD_CHANCE}  Burn: {FIRE_BURN_DURATION}  Wind: {WIND_DIRECTION} {WIND_STRENGTH}")
+print(f"  Vision      : {VISION_RADIUS}  Media alerts: {MEDIA_ALERTS_ON}")
 print("=" * 55)
 
 # Create the city
 city = CityModel(
-    width=CITY_WIDTH,
-    height=CITY_HEIGHT,
-    population=POPULATION,
-    group_distribution=GROUP_DISTRIBUTION
+    width              = CITY_WIDTH,
+    height             = CITY_HEIGHT,
+    population         = POPULATION,
+    group_distribution = GROUP_DISTRIBUTION,
+    fire_spread_chance = FIRE_SPREAD_CHANCE,
+    fire_burn_duration = FIRE_BURN_DURATION,
+    wind_direction     = WIND_DIRECTION,
+    wind_strength      = WIND_STRENGTH,
+    vision_radius      = VISION_RADIUS,
+    media_alerts_on    = MEDIA_ALERTS_ON,
 )
 
 # ─────────────────────────────────────────────
@@ -65,10 +79,12 @@ for step in range(NUMBER_OF_STEPS):
     informed  = city._count_informed()
     evacuated = city._count_evacuated()
     survivors = city._count_survivors()
+    dead      = city._count_dead()
 
     print(f"  Informed   : {informed} / {POPULATION}")
     print(f"  Evacuated  : {evacuated} / {POPULATION}")
     print(f"  Survivors  : {survivors} / {evacuated if evacuated > 0 else 1}")
+    print(f"  Dead       : {dead}")
 
 # ─────────────────────────────────────────────
 # FINAL RESULTS
@@ -115,11 +131,10 @@ for agent in agents:
     citizen_data.append({
         "id"               : agent.unique_id,
         "group"            : agent.group,
-        "information_level": round(agent.information_level, 2),
+        "belief_confidence": round(agent.belief_confidence, 2),
         "evacuated"        : agent.evacuated,
         "escape_origin"    : agent.escape_origin,
         "escape_direction" : agent.escape_direction,
-        "survival_chance"  : agent.survival_chance,
         "alive"            : agent.alive,
     })
 
