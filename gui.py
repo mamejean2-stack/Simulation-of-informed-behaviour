@@ -288,8 +288,10 @@ class App(tk.Tk):
         self.canvas.draw()
         self.canvas.get_tk_widget().pack()
 
-        # Hover tooltip on the graph
-        self._hover_ann = None
+        # Hover tooltips
+        self._hover_ann     = None   # graph tooltip
+        self._map_ann       = None   # map tooltip
+        self._hover_vline   = []
         self.canvas.mpl_connect("motion_notify_event", self._on_hover)
 
     # ─────────────────────────────────────────
@@ -451,7 +453,71 @@ class App(tk.Tk):
     # HOVER TOOLTIP
     # ─────────────────────────────────────────
 
+    def _on_map_hover(self, event):
+        """Show info about the cell (and any agents on it) under the cursor."""
+        if event.inaxes != self.ax_map or not self.city:
+            if self._map_ann:
+                self._map_ann.set_visible(False)
+                self.canvas.draw_idle()
+                self._map_ann = None
+            return
+
+        cx = int(round(event.xdata))
+        cy = int(round(event.ydata))
+
+        if not (0 <= cx < self.city.grid_width and 0 <= cy < self.city.grid_height):
+            return
+
+        cell = self.city.cells[cx][cy]
+
+        # Cell info
+        if cell.fire_state == "burning":
+            cell_line = f"FIRE  intensity {cell.intensity:.2f}  ({cell.burn_timer} steps left)"
+        elif cell.fire_state == "burnt":
+            cell_line = "BURNT"
+        else:
+            cell_line = "empty"
+
+        # Agents on this cell
+        here = [a for a in self.city.schedule.agents if a.position == (cx, cy)]
+        lines = [f"Cell ({cx},{cy}) — {cell_line}"]
+        if here:
+            for a in here[:4]:   # cap at 4 to keep tooltip tidy
+                if not a.alive:
+                    status = "dead"
+                elif a.evacuated:
+                    status = f"evacuated ({a.escape_direction})"
+                else:
+                    bf = f"({a.fire_belief[0]:.1f},{a.fire_belief[1]:.1f})" if a.fire_belief else "none"
+                    status = f"conf {a.belief_confidence:.2f}  belief {bf}"
+                lines.append(f"  [{a.group[:5]}] {status}")
+            if len(here) > 4:
+                lines.append(f"  … +{len(here)-4} more")
+        else:
+            lines.append("  no citizens")
+
+        label = "\n".join(lines)
+        ax    = self.ax_map
+
+        if self._map_ann:
+            try: self._map_ann.remove()
+            except: pass
+
+        # Anchor tooltip to avoid going off-screen
+        x_off = 10 if cx < self.city.grid_width * 0.7 else -10
+        ha    = "left" if x_off > 0 else "right"
+        self._map_ann = ax.annotate(
+            label,
+            xy=(cx, cy),
+            xytext=(x_off, 10), textcoords="offset points",
+            fontsize=7.5, color=FG, ha=ha,
+            bbox=dict(boxstyle="round,pad=0.4", fc="#111122", ec="#333355", alpha=0.93),
+            zorder=20,
+        )
+        self.canvas.draw_idle()
+
     def _on_hover(self, event):
+        self._on_map_hover(event)
         if event.inaxes != self.ax_graph or not self.history["step"]:
             if self._hover_ann:
                 self._hover_ann.set_visible(False)
