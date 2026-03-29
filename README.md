@@ -8,24 +8,38 @@ Built with Python and [Mesa](https://mesa.readthedocs.io/), the agent-based mode
 
 ## What it does
 
-A city of 100 citizens is placed on a 20×20 grid. A fire breaks out. Citizens who are informed flee in the right direction. Citizens who aren't may run straight toward it.
+A city of citizens is placed on a grid. A fire breaks out at a random edge and spreads inward. Citizens who are informed flee in the right direction. Citizens who aren't may run straight toward it.
 
 The core question: **does it matter how quickly people learn about a danger?**
 
-Each citizen has an `information_level` between 0.0 and 1.0. Information spreads two ways:
+Each citizen holds a `fire_belief` (estimated fire location) and a `belief_confidence` between 0.0 and 1.0. Information reaches citizens three ways:
 
-- **Proximity to fire** — citizens nearby gain awareness automatically each step
-- **Social network** — citizens pass information to connected neighbours
+- **Direct observation** — citizens within `vision_radius` cells of a burning cell gain awareness automatically each step
+- **Peer exchange** — citizens on the same cell share belief estimates, weighted by confidence
+- **Media alerts** — a 5% per-step chance of receiving a noisy broadcast of the fire's current centroid
 
-Once a citizen's information level crosses a threshold (0.3), they evacuate. Their escape direction is probabilistic — higher information means higher odds of going the right way.
+Belief decays each step without fresh input. Once confidence crosses 0.3, a citizen evacuates. Their escape direction is probabilistic — higher confidence means a stronger bias toward moving away from the fire.
+
+---
+
+## Fire mechanics
+
+The fire starts at a random grid edge and spreads each step. Wind always blows inward from the origin edge, boosting spread probability in the downwind direction and reducing it upwind. Each burning cell has a burn timer; when it expires the cell becomes ash and can no longer harm or block movement.
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `fire_spread_chance` | 0.30 | Base probability of igniting a neighbour each step |
+| `fire_burn_duration` | 8 | Steps a cell burns before becoming ash |
+| `wind_strength` | 0.20 | Added to spread chance in wind direction, halved against it |
+| `vision_radius` | 3 | How many cells away a citizen can see fire |
 
 ---
 
 ## Project structure
 
 ```
-agent.py        — The Citizen agent: information, evacuation, survival logic
-model.py        — The city: grid, social network, fire, scheduling
+agent.py        — The Citizen agent: belief system, evacuation, survival logic
+model.py        — The city: grid, fire spread, wind, scheduling
 run.py          — CLI simulation runner, exports CSV results
 visualize.py    — Interactive animated visualisation
 ```
@@ -37,7 +51,7 @@ visualize.py    — Interactive animated visualisation
 **Install dependencies** (Python 3.9+ recommended):
 
 ```bash
-pip install "mesa<3.0" pandas networkx matplotlib
+pip install "mesa<3.0" pandas matplotlib
 ```
 
 **Run the simulation (text output + CSV export):**
@@ -58,15 +72,15 @@ Use the **Play** and **Next** buttons to step through the simulation and watch i
 
 ## Visualisation
 
-The left panel shows the city map. Agent colour reflects information level:
+The left panel shows the city map. Agent colour reflects belief confidence:
 
 | Colour | Meaning |
 |--------|---------|
-| Purple | Uninformed |
+| Purple | Uninformed (confidence ≈ 0) |
 | White  | Partially informed |
-| Orange | Highly informed |
-| `^` triangle | Evacuated — safe direction |
-| `v` triangle | Evacuated — toward fire |
+| Orange | Highly confident |
+| `^` triangle | Evacuated — moved away from fire |
+| `v` triangle | Evacuated — moved toward fire |
 | `X` | Did not survive |
 | Star | Fire location |
 
@@ -78,8 +92,8 @@ The right panel plots informed, evacuated, and survivor counts over time.
 
 After running `run.py`, two CSV files are created:
 
-- `simulation_results.csv` — step-by-step population counts (informed, evacuated, survivors)
-- `citizen_results.csv` — per-citizen data (group, info level, escape direction, survival)
+- `simulation_results.csv` — step-by-step population counts (informed, evacuated, alive, dead)
+- `citizen_results.csv` — per-citizen data (group, belief confidence, escape direction, survival)
 
 ---
 
@@ -91,16 +105,22 @@ All parameters are at the top of `run.py` and `visualize.py`:
 CITY_WIDTH      = 20
 CITY_HEIGHT     = 20
 POPULATION      = 100
-NUMBER_OF_STEPS = 10
+NUMBER_OF_STEPS = 20
 
 GROUP_DISTRIBUTION = {
-    "north_district" : 0.40,   # closest to the fire
+    "north_district" : 0.40,   # closest to the fire origin edge
     "south_district" : 0.35,   # furthest from the fire
     "city_centre"    : 0.25,
 }
+
+FIRE_SPREAD_CHANCE  = 0.30   # base ignition probability per step
+FIRE_BURN_DURATION  = 8      # steps before a cell turns to ash
+WIND_STRENGTH       = 0.20   # spread boost in wind direction
+VISION_RADIUS       = 3      # cells a citizen can see
+MEDIA_ALERTS_ON     = True   # noisy broadcast about fire centroid
 ```
 
-Try increasing `NUMBER_OF_STEPS` or shifting the group distribution to see how outcomes change.
+Try increasing `NUMBER_OF_STEPS`, raising `fire_spread_chance`, or shifting the group distribution to see how outcomes change.
 
 ---
 
