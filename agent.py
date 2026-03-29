@@ -98,3 +98,38 @@ class Citizen(mesa.Agent):
 
         # Running the safe way gives a big survival bonus
         if self.escape_direction == "safe":
+            base_chance = 0.85
+        else:
+            base_chance = 0.15
+
+        return min(1.0, base_chance + distance_bonus * 0.15)
+
+    def step(self):
+        """
+        Each simulation step:
+        1. Receive information from connected neighbours in the social network
+        2. Decide to evacuate once informed enough
+        3. Calculate survival outcome at the moment of evacuation
+        """
+        if not self.alive:
+            return
+
+        if not self.evacuated:
+            # Pull information from every neighbour who knows more than us
+            for neighbor_id in self.model.social_network.neighbors(self.unique_id):
+                neighbor = self.model._agents_by_id.get(neighbor_id)
+                if neighbor and neighbor.information_level > self.information_level:
+                    self.receive_information(
+                        (neighbor.information_level - self.information_level) * 0.3
+                    )
+
+            # Evacuate once informed enough (threshold: 0.3)
+            if self.information_level >= 0.3:
+                self.evacuated     = True
+                self.escape_origin = self.position
+                self.escape_direction = self.calculate_escape_direction()
+                self.survival_chance  = self.calculate_survival_chance()
+
+                # Roll against survival chance to determine outcome
+                if random.random() > self.survival_chance:
+                    self.alive = False

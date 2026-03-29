@@ -107,7 +107,7 @@ print("  Saving simulation data...")
 # Collect the step-by-step data recorded during the simulation
 step_data = city.datacollector.get_model_vars_dataframe()
 step_data.to_csv("simulation_results.csv")
-print("  ✅ Data saved to: simulation_results.csv")
+print("  OK Data saved to: simulation_results.csv")
 
 # Save individual citizen data
 citizen_data = []
@@ -125,16 +125,6 @@ for agent in agents:
 
 citizen_df = pd.DataFrame(citizen_data)
 citizen_df.to_csv("citizen_results.csv", index=False)
-print("  ✅ Citizen data saved to: citizen_results.csv")
+print("  OK Citizen data saved to: citizen_results.csv")
 print("=" * 55)
-print("\n  Simulation complete! 🏙️")
-```
-
----
-
-## ✅ Run your simulation!
-
-In your terminal (with **(venv)** active):
-```
-cd ~/mysimulation/city_alert
-python3 run.py
+print("\n  Simulation complete!")

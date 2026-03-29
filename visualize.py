@@ -312,11 +312,3 @@ btn_next.on_clicked(on_next)
 draw_map(0)
 draw_graph()
 plt.show()
-```
-
----
-
-## ✅ Run the visualisation
-```
-cd ~/mysimulation/city_alert
-python3 visualize.py
