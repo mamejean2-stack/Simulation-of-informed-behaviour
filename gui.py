@@ -168,13 +168,16 @@ class App(tk.Tk):
             ("o", "#FF6600",       "Saw fire"),
             ("o", "#00CCDD",       "Heard from neighbour"),
             ("o", "#AAAAAA",       "Media alert"),
-            ("—", "#a8dadc",       "Alive (graph)"),
+            ("line", "#a8dadc",    "Alive (graph)"),
         ]:
             r = tk.Frame(left, bg=BG)
             r.pack(anchor="w", pady=1)
             fig_i, ax_i = plt.subplots(figsize=(0.25, 0.25))
             fig_i.patch.set_alpha(0)
-            ax_i.scatter([0], [0], marker=marker, color=[color], s=50)
+            if marker == "line":
+                ax_i.plot([0, 1], [0.5, 0.5], color=color, lw=2)
+            else:
+                ax_i.scatter([0.5], [0.5], marker=marker, color=[color], s=50)
             ax_i.axis("off")
             ci = FigureCanvasTkAgg(fig_i, master=r)
             ci.draw()
@@ -362,7 +365,21 @@ class App(tk.Tk):
                        s=95, marker="s", zorder=4, linewidths=0)
 
         # ── Agents ───────────────────────────────────────────────────
-        # Collect pulse ring data per event type
+        # ── Fire origin marker ────────────────────────────────────────
+        fox, foy = self.city.fire_origin
+        ax.scatter(fox, foy, c="white", s=55, marker="+",
+                   alpha=0.45, linewidths=1.5, zorder=5)
+
+        # ── Wind direction indicator (top-left corner) ────────────────
+        _wv = {"N": (0, 0.9), "S": (0, -0.9), "E": (0.9, 0), "W": (-0.9, 0)}
+        _wu, _wv2 = _wv[self.city.wind_direction]
+        ax.quiver([1.8], [GRID_SIZE - 2.2], [_wu], [_wv2],
+                  color="white", alpha=0.55, scale=1, scale_units="xy",
+                  angles="xy", width=0.004, headwidth=5, zorder=9)
+        ax.text(1.8, GRID_SIZE - 3.4, f"wind {self.city.wind_direction}",
+                color=FG_DIM, fontsize=6.5, ha="center")
+
+        # ── Collect pulse ring data per event type ────────────────────
         ring_data = {"fire": ([], []), "peer": ([], []), "media": ([], [])}
         # Belief arrow data
         arr_x, arr_y, arr_u, arr_v = [], [], [], []
