@@ -59,6 +59,17 @@ class App(tk.Tk):
 
         self._build_left_panel()
         self._build_right_panel()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _on_close(self):
+        self.is_playing = False
+        if self.ani:
+            try:
+                self.ani.event_source.stop()
+            except Exception:
+                pass
+        plt.close("all")
+        self.destroy()
 
     # ─────────────────────────────────────────
     # LEFT PANEL
@@ -564,11 +575,16 @@ class App(tk.Tk):
                  f"Alive    : {al}\n"
                  f"Dead     : {d}")
 
+        # Flip tooltip to the left when cursor is on the right side of the graph
+        x_frac  = s / max(1, self.var_steps.get())
+        x_off   = -90 if x_frac > 0.6 else 12
+        ha      = "left" if x_off > 0 else "left"
+
         ax = self.ax_graph
         if self._hover_ann is None:
             self._hover_ann = ax.annotate(
                 label, xy=(s, al),
-                xytext=(12, 12), textcoords="offset points",
+                xytext=(x_off, 12), textcoords="offset points",
                 fontsize=8, color=FG,
                 bbox=dict(boxstyle="round,pad=0.4", fc="#111122",
                           ec="#333355", alpha=0.92),
@@ -576,6 +592,7 @@ class App(tk.Tk):
         else:
             self._hover_ann.set_text(label)
             self._hover_ann.xy = (s, al)
+            self._hover_ann.xyann = (x_off, 12)
             self._hover_ann.set_visible(True)
         # Vertical guide line
         for line in getattr(self, "_hover_vline", []):
@@ -647,9 +664,13 @@ class App(tk.Tk):
     def _play(self):
         if not self.city or self.current_step >= self.var_steps.get():
             return
-        self.is_playing   = True
-        self._anim_frame  = 0
+        self.is_playing = True
         self.btn_play.config(text="⏸  Pause")
+
+        # Create the animation once; keep it alive for the whole simulation.
+        # Pausing just sets is_playing=False so the tick becomes a no-op.
+        if self.ani is not None:
+            return   # already running, just needed to flip is_playing
 
         def _tick(_f):
             if not self.is_playing:
@@ -658,10 +679,10 @@ class App(tk.Tk):
             frames_per_step = max(2, self.var_interval.get() // FRAME_MS)
 
             if self._anim_frame == 0:
-                # Advance sim on the first sub-frame of each step
                 still_going = self._sim_step()
                 if not still_going:
-                    self._pause()
+                    self.is_playing = False
+                    self.btn_play.config(text="▶  Play")
                     return
 
             t = min(1.0, (self._anim_frame + 1) / frames_per_step)
@@ -682,8 +703,6 @@ class App(tk.Tk):
     def _pause(self):
         self.is_playing = False
         self.btn_play.config(text="▶  Play")
-        if self.ani:
-            self.ani.event_source.stop()
 
     def _toggle_play(self):
         if not self.city:
