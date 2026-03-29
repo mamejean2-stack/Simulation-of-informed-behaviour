@@ -84,13 +84,30 @@ class CityModel(mesa.Model):
         self.grid_height = height
 
         # ── Fire parameters ─────────────────────────────────────────
-        self.fire_origin        = (2, 2)
-        self.fire_position      = self.fire_origin   # backwards compat
+        # Fire starts at a random position along a random edge.
+        # Wind always blows inward from that edge so fire spreads into the city.
+        edge = random.choice(["N", "S", "E", "W"])
+        if edge == "N":
+            ox, oy         = random.randrange(width), height - 1
+            inward_wind    = "S"
+        elif edge == "S":
+            ox, oy         = random.randrange(width), 0
+            inward_wind    = "N"
+        elif edge == "E":
+            ox, oy         = width - 1, random.randrange(height)
+            inward_wind    = "W"
+        else:  # W
+            ox, oy         = 0, random.randrange(height)
+            inward_wind    = "E"
+
+        self.fire_origin        = (ox, oy)
+        self.fire_position      = self.fire_origin
         self.fire_spread_chance = fire_spread_chance
         self.fire_burn_duration = fire_burn_duration
 
         # ── Wind ────────────────────────────────────────────────────
-        self.wind_direction = wind_direction
+        # Direction is auto-set so fire always blows inward; strength is configurable.
+        self.wind_direction = inward_wind
         self.wind_strength  = wind_strength
 
         # ── Citizen behaviour ────────────────────────────────────────
@@ -254,15 +271,18 @@ class CityModel(mesa.Model):
     # ─────────────────────────────────────────────────────────────────
 
     def _count_informed(self):
-        """Citizens whose belief confidence has crossed the evacuation threshold."""
+        """Living citizens whose belief confidence has crossed the awareness threshold."""
         return sum(1 for a in self.schedule.agents
-                   if a.belief_confidence >= 0.3)
+                   if a.belief_confidence >= 0.3 and a.alive)
 
     def _count_evacuated(self):
         return sum(1 for a in self.schedule.agents if a.evacuated)
 
     def _count_survivors(self):
         return sum(1 for a in self.schedule.agents if a.evacuated and a.alive)
+
+    def _count_alive(self):
+        return sum(1 for a in self.schedule.agents if a.alive)
 
     def _count_dead(self):
         return sum(1 for a in self.schedule.agents if not a.alive)

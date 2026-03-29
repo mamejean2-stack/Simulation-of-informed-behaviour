@@ -55,7 +55,7 @@ class App(tk.Tk):
         self.ani          = None
         self._anim_frame  = 0   # sub-frame counter within current sim step
         self.history      = {"step": [], "informed": [], "evacuated": [],
-                             "survivors": [], "dead": []}
+                             "alive": [], "dead": []}
 
         self._build_left_panel()
         self._build_right_panel()
@@ -93,16 +93,15 @@ class App(tk.Tk):
         # City
         self._section(left, "City")
         self.var_population = self._slider(left, "Population", 20, 200, DEFAULT_POP)
-        self.var_steps      = self._slider(left, "Steps",       5,  60,  30)
+        self.var_steps      = self._slider(left, "Steps",       5, 100,  60)
 
         # Fire
         self._section(left, "Fire")
         self.var_spread     = self._fslider(left, "Spread chance",  0.05, 0.80, 0.30)
         self.var_burn       = self._slider( left, "Burn duration",  3,    20,   8)
 
-        # Wind
+        # Wind (direction is auto-set from fire start edge; only strength is exposed)
         self._section(left, "Wind")
-        self.var_wind_dir   = self._wind_buttons(left)
         self.var_wind_str   = self._fslider(left, "Strength", 0.0, 0.5, 0.20)
 
         # Speed
@@ -153,7 +152,7 @@ class App(tk.Tk):
         self._section(left, "Live Stats")
         self.lbl_informed  = self._stat_row(left, "Informed",  "#FFD700")
         self.lbl_evacuated = self._stat_row(left, "Evacuated", HIGHLIGHT)
-        self.lbl_survivors = self._stat_row(left, "Survivors", "#a8dadc")
+        self.lbl_alive     = self._stat_row(left, "Alive",     "#a8dadc")
         self.lbl_dead      = self._stat_row(left, "Dead",      "#e63946")
 
         # Legend
@@ -169,6 +168,7 @@ class App(tk.Tk):
             ("o", "#FF6600",       "Saw fire"),
             ("o", "#00CCDD",       "Heard from neighbour"),
             ("o", "#AAAAAA",       "Media alert"),
+            ("—", "#a8dadc",       "Alive (graph)"),
         ]:
             r = tk.Frame(left, bg=BG)
             r.pack(anchor="w", pady=1)
@@ -287,6 +287,10 @@ class App(tk.Tk):
         self.canvas = FigureCanvasTkAgg(self.fig, master=right)
         self.canvas.draw()
         self.canvas.get_tk_widget().pack()
+
+        # Hover tooltip on the graph
+        self._hover_ann = None
+        self.canvas.mpl_connect("motion_notify_event", self._on_hover)
 
     # ─────────────────────────────────────────
     # DRAWING
@@ -436,12 +440,58 @@ class App(tk.Tk):
                     marker="o", ms=4, label="Informed")
             ax.plot(h["step"], h["evacuated"], color=HIGHLIGHT, lw=2,
                     marker="s", ms=4, label="Evacuated")
-            ax.plot(h["step"], h["survivors"], color="#a8dadc", lw=2,
-                    marker="^", ms=4, label="Survivors")
+            ax.plot(h["step"], h["alive"],     color="#a8dadc", lw=2,
+                    marker="^", ms=4, label="Alive")
             ax.plot(h["step"], h["dead"],      color="#e63946", lw=2,
                     marker="x", ms=5, label="Dead")
         ax.legend(fontsize=8, facecolor="#111122", labelcolor=FG,
                   framealpha=0.85, edgecolor="#333355")
+
+    # ─────────────────────────────────────────
+    # HOVER TOOLTIP
+    # ─────────────────────────────────────────
+
+    def _on_hover(self, event):
+        if event.inaxes != self.ax_graph or not self.history["step"]:
+            if self._hover_ann:
+                self._hover_ann.set_visible(False)
+                self.canvas.draw_idle()
+            return
+
+        # Find nearest step
+        steps = self.history["step"]
+        mx    = event.xdata
+        if mx is None:
+            return
+        idx = min(range(len(steps)), key=lambda i: abs(steps[i] - mx))
+        s   = steps[idx]
+        inf = self.history["informed"][idx]
+        ev  = self.history["evacuated"][idx]
+        al  = self.history["alive"][idx]
+        d   = self.history["dead"][idx]
+
+        label = (f"Step {s}\n"
+                 f"Informed : {inf}\n"
+                 f"Evacuated: {ev}\n"
+                 f"Alive    : {al}\n"
+                 f"Dead     : {d}")
+
+        ax = self.ax_graph
+        if self._hover_ann:
+            self._hover_ann.remove()
+        self._hover_ann = ax.annotate(
+            label,
+            xy=(s, al),
+            xytext=(12, 12), textcoords="offset points",
+            fontsize=8, color=FG,
+            bbox=dict(boxstyle="round,pad=0.4", fc="#111122", ec="#333355", alpha=0.92),
+        )
+        # Vertical guide line
+        for line in getattr(self, "_hover_vline", []):
+            try: line.remove()
+            except: pass
+        self._hover_vline = [ax.axvline(s, color=FG_DIM, lw=0.8, alpha=0.5)]
+        self.canvas.draw_idle()
 
     # ─────────────────────────────────────────
     # SIM CONTROL
@@ -460,7 +510,6 @@ class App(tk.Tk):
             },
             fire_spread_chance = self.var_spread.get_float(),
             fire_burn_duration = self.var_burn.get(),
-            wind_direction     = self.var_wind_dir.get(),
             wind_strength      = self.var_wind_str.get_float(),
             vision_radius      = 3,
             media_alerts_on    = True,
@@ -485,13 +534,13 @@ class App(tk.Tk):
 
         i = self.city._count_informed()
         e = self.city._count_evacuated()
-        s = self.city._count_survivors()
+        a = self.city._count_alive()
         d = self.city._count_dead()
 
         self.history["step"].append(self.current_step)
         self.history["informed"].append(i)
         self.history["evacuated"].append(e)
-        self.history["survivors"].append(s)
+        self.history["alive"].append(a)
         self.history["dead"].append(d)
 
         self.lbl_step.config(
@@ -499,7 +548,7 @@ class App(tk.Tk):
         )
         self.lbl_informed.config( text=f"{i} / {pop}")
         self.lbl_evacuated.config(text=f"{e} / {pop}")
-        self.lbl_survivors.config(text=f"{s} / {max(e,1)}")
+        self.lbl_alive.config(    text=f"{a} / {pop}")
         self.lbl_dead.config(     text=str(d))
 
         return self.current_step < self.var_steps.get()
@@ -567,13 +616,13 @@ class App(tk.Tk):
         self.city         = None
         self._anim_frame  = 0
         self.history      = {"step": [], "informed": [], "evacuated": [],
-                             "survivors": [], "dead": []}
+                             "alive": [], "dead": []}
         self.btn_play.config(text="▶  Play", state="disabled")
         self.btn_next.config(state="disabled")
         self.btn_reset.config(state="disabled")
         self.lbl_step.config(text="Step: —")
         for lbl in (self.lbl_informed, self.lbl_evacuated,
-                    self.lbl_survivors, self.lbl_dead):
+                    self.lbl_alive, self.lbl_dead):
             lbl.config(text="—")
 
     def _reset(self):
